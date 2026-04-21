@@ -59,5 +59,5 @@ install -Dm 0755 scripts/run_checksum.sh \
 
 
 %changelog
-* Mon Apr 21 2026 Package Maintainer <maintainer@example.com> - 0.1.0-1
+* Tue Apr 21 2026 Package Maintainer <maintainer@example.com> - 0.1.0-1
 - Initial release
