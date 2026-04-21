@@ -92,7 +92,7 @@ editing is required after deployment.
 |----------|---------|-------------|
 | `CEPHSUM_PREFIX` | `/mnt` | Filesystem prefix prepended to the XRootD LFN |
 | `CEPHSUM_ALGO` | `adler32` | Checksum algorithm |
-| `CEPHSUM_BLOCK_MIB` | `32` | Read block size in MiB |
+| `CEPHSUM_BLOCK_MIB` | `4` | Read block size in MiB |
 | `CEPHSUM_THREADS` | `4` | Concurrent read threads |
 | `CEPHSUM_LOG_FILE` | *(unset)* | Append diagnostics to this path |
 | `CEPHSUM_PYTHON` | `python3` | Python interpreter |

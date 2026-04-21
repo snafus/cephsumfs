@@ -1,22 +1,3 @@
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
-
-[project]
-name = "cephsumfs"
-version = "0.1.0"
-description = "External checksum tool for XRootD on Ceph-backed POSIX storage"
-readme = "README.md"
-requires-python = ">=3.6.8"
-license = {text = "Apache-2.0"}
-dependencies = []
-
-[project.scripts]
-cephsumfs = "cephsumfs.cli:main"
-
-[project.optional-dependencies]
-test = ["pytest"]
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["cephsumfs*"]
