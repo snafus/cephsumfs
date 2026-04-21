@@ -1,0 +1,78 @@
+name: Build RPMs
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-rpm:
+    name: RPM (el${{ matrix.el }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        el: ["8", "9"]
+
+    container:
+      image: almalinux:${{ matrix.el }}
+
+    steps:
+      - name: Install git and build tools
+        run: |
+          dnf install -y git rpm-build python3-devel python3-setuptools python3-pytest
+
+      - uses: actions/checkout@v4
+
+      - name: Read version from spec
+        id: ver
+        run: |
+          VERSION=$(awk '/^Version:/{print $2}' cephsum/cephsumfs.spec)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create source tarball
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          # Repack checkout subdirectory as cephsumfs-<version>/
+          tar czf ~/rpmbuild/SOURCES/cephsumfs-${V}.tar.gz \
+              --transform "s|^cephsum|cephsumfs-${V}|" \
+              cephsum
+          cp cephsum/cephsumfs.spec ~/rpmbuild/SPECS/
+
+      - name: Build SRPM and binary RPM
+        run: rpmbuild -ba ~/rpmbuild/SPECS/cephsumfs.spec
+
+      - name: Collect RPMs
+        run: |
+          mkdir -p dist
+          find ~/rpmbuild/RPMS ~/rpmbuild/SRPMS -name '*.rpm' -exec cp {} dist/ \;
+          ls -lh dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cephsumfs-el${{ matrix.el }}-rpms
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  release:
+    name: Attach RPMs to release
+    needs: build-rpm
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cephsumfs-el*-rpms
+          merge-multiple: true
+          path: dist/
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.rpm
