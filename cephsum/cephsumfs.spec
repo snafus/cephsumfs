@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        External checksum helper for XRootD on Ceph-backed POSIX storage
 
 License:        Apache-2.0
-# Source0:      %{name}-%{version}.tar.gz
+Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 BuildRequires:  python3-devel
