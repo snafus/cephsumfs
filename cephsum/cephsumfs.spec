@@ -8,7 +8,9 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 BuildRequires:  python3-devel
+BuildRequires:  python3-pip
 BuildRequires:  python3-setuptools
+BuildRequires:  python3-pytest
 
 Requires:       python3 >= 3.6.8
 # libcrc32c provides hardware-accelerated CRC-32C via SSE4.2.
@@ -32,11 +34,12 @@ entries are recomputed and written back automatically.
 
 
 %build
-%py3_build
+# Pure Python package — nothing to compile.
 
 
 %install
-%py3_install
+pip3 install --no-build-isolation --no-deps \
+    --root %{buildroot} --prefix %{_prefix} .
 
 install -Dm 0755 scripts/run_checksum.sh \
     %{buildroot}%{_libexecdir}/cephsumfs/run_checksum.sh
@@ -53,7 +56,7 @@ install -Dm 0755 scripts/run_checksum.sh \
 %license LICENSE
 %doc README.md
 %{python3_sitelib}/cephsumfs/
-%{python3_sitelib}/cephsumfs-*.egg-info/
+%{python3_sitelib}/cephsumfs-%{version}.dist-info/
 %{_bindir}/cephsumfs
 %{_libexecdir}/cephsumfs/run_checksum.sh
 
