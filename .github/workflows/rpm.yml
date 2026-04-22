@@ -1,4 +1,4 @@
-name: Build RPMs
+name: Build packages
 
 on:
   push:
@@ -79,9 +79,61 @@ jobs:
           path: dist/*.rpm
           if-no-files-found: error
 
+  build-deb:
+    name: DEB (ubuntu ${{ matrix.ubuntu }})
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["22.04", "24.04"]
+
+    container:
+      image: ubuntu:${{ matrix.ubuntu }}
+
+    steps:
+      - name: Install git and build tools
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git debhelper dh-python python3-all python3-setuptools \
+            python3-pytest fakeroot
+
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: |
+          VERSION=$(awk -F' = ' '/^version/{print $2}' cephsum/setup.cfg)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create source tree and orig tarball
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          cp -r cephsum cephsumfs-${V}
+          tar czf cephsumfs_${V}.orig.tar.gz cephsumfs-${V}
+
+      - name: Build .deb
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          cd cephsumfs-${V}
+          dpkg-buildpackage -us -uc -b
+
+      - name: Collect DEBs
+        run: |
+          mkdir -p dist
+          find . -maxdepth 1 -name '*.deb' -exec cp {} dist/ \;
+          ls -lh dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cephsumfs-ubuntu${{ matrix.ubuntu }}-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
   release:
-    name: Attach RPMs to release
-    needs: build-rpm
+    name: Attach packages to release
+    needs: [build-rpm, build-deb]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -90,11 +142,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: cephsumfs-el*-rpms
+          pattern: cephsumfs-*
           merge-multiple: true
           path: dist/
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.rpm
+          files: dist/*

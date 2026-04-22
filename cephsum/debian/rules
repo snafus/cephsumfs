@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+export PYBUILD_NAME = cephsumfs
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_test:
+	python3 -m pytest tests/ -v
+
+override_dh_auto_install:
+	dh_auto_install
+	install -Dm 0755 scripts/run_checksum.sh \
+		$(CURDIR)/debian/cephsumfs/usr/libexec/cephsumfs/run_checksum.sh

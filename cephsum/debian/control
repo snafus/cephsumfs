@@ -1,0 +1,27 @@
+Source: cephsumfs
+Section: utils
+Priority: optional
+Maintainer: Package Maintainer <maintainer@example.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ python3-all,
+ python3-setuptools,
+ python3-pytest,
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: cephsumfs
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}
+Recommends: libcrc32c1
+Description: External checksum helper for XRootD on Ceph-backed POSIX storage
+ cephsumfs computes and caches file checksums for XRootD using Linux extended
+ attributes in the XrdCks wire format. It supports adler32, crc32, crc32c,
+ md5, and sha256, and is designed to be called by XRootD as an external
+ checksum helper via the xrd.chksum directive.
+ .
+ Checksums are read from an xattr cache when available and validated against
+ the file mtime before use. Stale or absent entries are recomputed and written
+ back automatically. File reads use a multithreaded os.pread() pipeline to
+ hide per-read latency on networked CephFS storage.
