@@ -99,17 +99,44 @@ editing is required after deployment.
 
 ## xattr format
 
-Checksums are stored under `user.XrdCks.<algo>` as a 96-byte big-endian blob:
+Checksums are stored under `user.XrdCks.<algo>` as a 96-byte blob serialised in
+**network byte order (big-endian)**:
 
-| Offset | Size | Field | Description |
-|--------|------|-------|-------------|
-| 0 | 16 B | name | Algorithm name, NUL-padded |
-| 16 | 8 B | fmTime | File mtime at compute time (uint64, seconds) |
-| 24 | 4 B | csTime | Elapsed seconds during computation (uint32) |
-| 28 | 2 B | — | Reserved |
-| 30 | 1 B | — | Reserved |
-| 31 | 1 B | length | Meaningful bytes in value[] |
-| 32 | 64 B | value | Raw digest bytes, zero-padded |
+| Offset | Size | Field | Type | Description |
+|--------|------|-------|------|-------------|
+| 0 | 16 B | name | `char[]` | Algorithm name, NUL-padded, ASCII |
+| 16 | 8 B | fmTime | `uint64` **BE** | File mtime at compute time (seconds since epoch) |
+| 24 | 4 B | csTime | `uint32` **BE** | Elapsed seconds during computation |
+| 28 | 2 B | — | `uint16` **BE** | Reserved |
+| 30 | 1 B | — | `uint8` | Reserved |
+| 31 | 1 B | length | `uint8` | Meaningful bytes in value[] |
+| 32 | 64 B | value | `char[]` | Raw digest bytes, zero-padded |
+
+### Endianness
+
+The `name` and `value` fields are byte arrays and are endianness-neutral.  The
+numeric header fields (`fmTime`, `csTime`, the reserved words, and `length`) are
+all big-endian, matching XRootD's `XrdCks` native wire format.  Writing these
+fields in little-endian would produce silently incorrect mtime values, causing
+every cache lookup to be treated as stale.
+
+The digest bytes stored in `value` are also big-endian for the built-in 32-bit
+algorithms:
+
+| Algorithm | Digest bytes |
+|-----------|-------------|
+| adler32 | `struct.pack(">I", value)` — 4 bytes, big-endian |
+| crc32 | `struct.pack(">I", value)` — 4 bytes, big-endian |
+| crc32c | `struct.pack(">I", value)` — 4 bytes, big-endian |
+| md5 | `hashlib` byte string — 16 bytes, endianness-neutral |
+| sha256 | `hashlib` byte string — 32 bytes, endianness-neutral |
+
+**For custom algorithm implementors:** `ChecksumAlgorithm.digest()` must return
+bytes in the order XRootD expects.  For integer-valued checksums this means
+big-endian (`struct.pack(">I", ...)` for 32-bit, `struct.pack(">Q", ...)` for
+64-bit).  Using little-endian here would produce a checksum that verifies
+correctly within cephsumfs but disagrees with any other XRootD client that
+reads the xattr directly.
 
 ## Performance
 
