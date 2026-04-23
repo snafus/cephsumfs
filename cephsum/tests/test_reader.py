@@ -11,6 +11,7 @@ import struct
 import tempfile
 import unittest
 import zlib
+from unittest import mock
 
 from cephsumfs.algorithms import Adler32, get_algorithm
 from cephsumfs.reader import ALLOWED_BLOCK_MIB, compute_checksum
@@ -116,6 +117,24 @@ class TestValidation(unittest.TestCase):
     def test_missing_file(self):
         with self.assertRaises(OSError):
             compute_checksum("/nonexistent/path/file.dat", Adler32())
+
+    def test_short_read_raises_oserror(self):
+        # Simulate a file that is truncated between fstat and pread by
+        # patching os.pread to return fewer bytes than requested on the
+        # second block.  The reader must raise OSError rather than silently
+        # computing a checksum over truncated data.
+        data = os.urandom(2 * 1024 * 1024)
+        path = _write_tmp(data)
+        try:
+            real_pread = os.pread
+            def _truncating_pread(fd, size, offset):
+                result = real_pread(fd, size, offset)
+                return result[: len(result) // 2] if offset > 0 else result
+            with mock.patch("os.pread", side_effect=_truncating_pread):
+                with self.assertRaises(OSError):
+                    compute_checksum(path, Adler32(), block_mib=1, threads=1)
+        finally:
+            os.unlink(path)
 
     def test_allowed_block_sizes_all_work(self):
         data = os.urandom(1024)

@@ -59,11 +59,17 @@ log = logging.getLogger("cephsumfs")
 def _configure_logging(log_file: Optional[str], log_stderr: bool) -> None:
     """Attach file and/or stderr handlers to the root cephsumfs logger.
 
-    Idempotent: if handlers have already been attached (e.g. in tests that
-    call main() more than once) this function returns immediately.
+    Idempotent with respect to real handlers: if a FileHandler or
+    StreamHandler is already attached this function returns immediately.
+    A NullHandler added by a prior no-logging call is removed so that a
+    subsequent call with real handlers takes effect (relevant in tests that
+    call main() more than once with different arguments).
     """
-    if log.handlers:
+    real = [h for h in log.handlers if not isinstance(h, logging.NullHandler)]
+    if real:
         return
+    for h in list(log.handlers):
+        log.removeHandler(h)
 
     if not log_file and not log_stderr:
         log.addHandler(logging.NullHandler())
@@ -154,6 +160,9 @@ def _mode_verify(
     except ValueError as exc:
         _exit_errno(errno.EINVAL, "malformed xattr on {!r}: {}".format(path, exc))
 
+    # is_current() is intentionally not checked here: --verify always
+    # recomputes from file data regardless of mtime, so the comparison
+    # below is the authoritative integrity check.
     meta_hex = rec.digest_hex()
     data_digest = _compute(path, algo, block_mib, threads, inflight)
     data_hex = data_digest.hex()
@@ -195,9 +204,9 @@ def _mode_default(
             # operators know the xattr needs repair.
             _exit_errno(errno.EINVAL, "malformed xattr on {!r}: {}".format(path, exc))
 
-    start = time.time()
+    start = time.monotonic()
     data_digest = _compute(path, algo, block_mib, threads, inflight)
-    cs_delta = max(0, int(time.time() - start))
+    cs_delta = max(0, int(time.monotonic() - start))
     data_hex = data_digest.hex()
 
     should_write = not compute_only and not dry_run
@@ -321,6 +330,17 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
 
     _configure_logging(args.log_file, args.log_stderr)
+
+    # Validate that write-path flags are not combined with read-only modes.
+    if args.verify or args.remove:
+        mode = "--verify" if args.verify else "--remove"
+        for val, name in [
+            (args.override,     "--override"),
+            (args.compute_only, "--compute-only"),
+            (args.dry_run,      "--dry-run"),
+        ]:
+            if val:
+                p.error("{} has no effect with {}".format(name, mode))
 
     path = args.path
     algo = args.algo

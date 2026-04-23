@@ -209,6 +209,39 @@ class TestRemoveMode(unittest.TestCase):
         self.assertEqual(out, "")
 
 
+class TestFlagConflicts(unittest.TestCase):
+    """--override / --compute-only / --dry-run must be rejected with --verify or --remove."""
+
+    def setUp(self):
+        self._path = _write_tmp(b"conflict test")
+
+    def tearDown(self):
+        os.unlink(self._path)
+
+    def _assert_conflict(self, argv):
+        code, out = _run(argv)
+        self.assertEqual(code, 2, "expected exit 2 for conflicting flags: {}".format(argv))
+        self.assertEqual(out, "")
+
+    def test_override_with_verify(self):
+        self._assert_conflict([self._path, "--verify", "--override"])
+
+    def test_compute_only_with_verify(self):
+        self._assert_conflict([self._path, "--verify", "--compute-only"])
+
+    def test_dry_run_with_verify(self):
+        self._assert_conflict([self._path, "--verify", "--dry-run"])
+
+    def test_override_with_remove(self):
+        self._assert_conflict([self._path, "--remove", "--override"])
+
+    def test_compute_only_with_remove(self):
+        self._assert_conflict([self._path, "--remove", "--compute-only"])
+
+    def test_dry_run_with_remove(self):
+        self._assert_conflict([self._path, "--remove", "--dry-run"])
+
+
 @unittest.skipUnless(hasattr(os, "setxattr"), "requires Linux xattr support")
 class TestOverrideMode(unittest.TestCase):
     def setUp(self):

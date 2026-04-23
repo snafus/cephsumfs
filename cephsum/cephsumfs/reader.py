@@ -20,6 +20,7 @@ Allowed block sizes are powers of two from 1 MiB to 64 MiB.  The default of
 32 MiB is recommended for large Ceph objects over a fast network.
 """
 
+import errno
 import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -121,6 +122,19 @@ def compute_checksum(
 
             for idx in range(num_blocks):
                 data = futures.pop(idx).result()
+                expected_size = min(block_size, file_size - idx * block_size)
+                if len(data) != expected_size:
+                    log.warning(
+                        "short read on %r at block %d offset %d: "
+                        "expected %d bytes, got %d — file was modified during "
+                        "checksum computation",
+                        path, idx, idx * block_size, expected_size, len(data),
+                    )
+                    raise OSError(
+                        errno.EIO,
+                        "file modified during checksum: short read at block {}".format(idx),
+                        path,
+                    )
                 algo.update(data)
                 # Refill pipeline.
                 while next_submit < num_blocks and len(futures) < inflight:
