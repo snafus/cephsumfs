@@ -97,7 +97,17 @@ def compute_checksum(
         path, algo.name, block_mib, threads, inflight,
     )
 
-    fd = os.open(path, os.O_RDONLY | _O_NOATIME)
+    try:
+        fd = os.open(path, os.O_RDONLY | _O_NOATIME)
+    except OSError as exc:
+        if exc.errno == errno.EPERM and _O_NOATIME:
+            # O_NOATIME requires the process to own the file or hold
+            # CAP_FOWNER.  Fall back silently when permission is denied so
+            # that world-readable files owned by other users still work.
+            log.debug("O_NOATIME denied on %r, retrying without", path)
+            fd = os.open(path, os.O_RDONLY)
+        else:
+            raise
     try:
         file_size = int(os.fstat(fd).st_size)
 
