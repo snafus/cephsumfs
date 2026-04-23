@@ -6,9 +6,14 @@ Runs compute_checksum across all supported block sizes and a range of thread
 counts, then reports:
 
   - Raw algorithm ceiling (in-memory, no I/O)
-  - Per-(block_mib, threads) throughput on a real temp file
+  - Per-(block_mib, threads) cold and warm throughput on a real temp file
   - Whether the workload is I/O-bound or CPU-bound
   - Recommended settings for run_checksum.sh
+
+Cold throughput is measured after dropping the OS page cache (requires root).
+Warm throughput is the mean of subsequent passes with the file in cache.
+For Ceph tuning, cold throughput is the relevant figure — XRootD typically
+checksums large files that have not been recently accessed.
 
 Usage
 -----
@@ -20,7 +25,7 @@ Usage
                         mount point to profile against real storage
                         (default: system temp directory)
     --max-threads N     Highest thread count to test (default: min(8, cpus))
-    --min-duration S    Minimum seconds per measurement (default: 2.0)
+    --min-duration S    Minimum seconds for warm passes per measurement (default: 2.0)
     --json              Print results as JSON instead of a table
     --verbose           Show progress during measurement
 
@@ -74,6 +79,38 @@ def _cpu_info() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Cache management
+# ---------------------------------------------------------------------------
+
+_cache_drop_warned = False
+
+
+def _drop_caches() -> bool:
+    """
+    Drop the kernel page cache, dentry cache, and inode cache.
+
+    Writes 3 to /proc/sys/vm/drop_caches — requires root.  Returns True on
+    success, False if permission is denied.  Prints a warning to stderr on
+    the first failure so the caller knows cold-read figures are unreliable.
+    """
+    global _cache_drop_warned
+    try:
+        with open("/proc/sys/vm/drop_caches", "w") as f:
+            f.write("3\n")
+        return True
+    except OSError:
+        if not _cache_drop_warned:
+            print(
+                "WARNING: cannot drop page cache (/proc/sys/vm/drop_caches): "
+                "not root?  Cold-read figures will reflect warm cache and will "
+                "overstate storage throughput.",
+                file=sys.stderr,
+            )
+            _cache_drop_warned = True
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Measurement helpers
 # ---------------------------------------------------------------------------
 
@@ -111,36 +148,46 @@ def _measure_pipeline(
     threads: int,
     min_duration: float,
     verbose: bool,
-) -> float:
+) -> dict:
     """
-    Return end-to-end throughput in MB/s including real file I/O.
+    Return cold and warm end-to-end throughput in MB/s including real file I/O.
 
-    Runs repeatedly until min_duration seconds have elapsed and returns the
-    mean throughput.  Uses the best of three runs to reduce noise from page
-    cache cold-start effects.
+    Cold: one pass after dropping the OS page cache (requires root; falls back
+    to an uncached-best-effort first pass if cache drop fails).
+
+    Warm: mean of subsequent passes until min_duration seconds have elapsed
+    (at least one additional pass).  Warm figures reflect the OS page cache
+    serving the data — useful as a ceiling for repeated-access workloads.
     """
-    times = []
+    # --- Cold pass ---
+    _drop_caches()
+    algo = get_algorithm(algo_name)
+    t0 = time.perf_counter()
+    compute_checksum(path, algo, block_mib=block_mib, threads=threads)
+    cold_elapsed = time.perf_counter() - t0
+    cold_mbs = file_size_mib / cold_elapsed
+
+    # --- Warm passes ---
+    warm_times = []
     deadline = time.perf_counter() + min_duration
-
-    # Always do at least two passes; stop when min_duration is reached.
-    while time.perf_counter() < deadline or len(times) < 2:
+    while time.perf_counter() < deadline or len(warm_times) < 1:
         algo = get_algorithm(algo_name)
         t0 = time.perf_counter()
         compute_checksum(path, algo, block_mib=block_mib, threads=threads)
-        times.append(time.perf_counter() - t0)
+        warm_times.append(time.perf_counter() - t0)
+
+    warm_mbs = file_size_mib / (sum(warm_times) / len(warm_times))
 
     if verbose:
         print(
-            "    block_mib={:2d} threads={}: {:.0f} MB/s ({} passes)".format(
-                block_mib, threads,
-                file_size_mib / min(times),
-                len(times),
+            "    block_mib={:2d} threads={}: cold={:.0f} MB/s  warm={:.0f} MB/s"
+            "  ({} warm passes)".format(
+                block_mib, threads, cold_mbs, warm_mbs, len(warm_times),
             ),
             flush=True,
         )
 
-    # Report best observed (closest to storage ceiling, fewest cache effects).
-    return file_size_mib / min(times)
+    return {"cold_mbs": cold_mbs, "warm_mbs": warm_mbs}
 
 
 # ---------------------------------------------------------------------------
@@ -149,11 +196,14 @@ def _measure_pipeline(
 
 def _recommend(results: list, ceiling_mbs: float) -> dict:
     """
-    Given a list of {block_mib, threads, throughput_mbs} dicts and the
+    Given a list of {block_mib, threads, cold_mbs, warm_mbs} dicts and the
     in-memory algorithm ceiling, return recommended settings and a diagnosis.
+
+    Recommendations are based on cold throughput — that is the relevant figure
+    for XRootD checksumming large, infrequently accessed files.
     """
-    best = max(results, key=lambda r: r["throughput_mbs"])
-    ratio = best["throughput_mbs"] / ceiling_mbs if ceiling_mbs > 0 else 0.0
+    best = max(results, key=lambda r: r["cold_mbs"])
+    ratio = best["cold_mbs"] / ceiling_mbs if ceiling_mbs > 0 else 0.0
 
     if ratio > 0.85:
         bound = "cpu"
@@ -182,7 +232,8 @@ def _recommend(results: list, ceiling_mbs: float) -> dict:
         "diagnosis": diagnosis,
         "best_block_mib": best["block_mib"],
         "best_threads": best["threads"],
-        "best_throughput_mbs": best["throughput_mbs"],
+        "best_cold_mbs": best["cold_mbs"],
+        "best_warm_mbs": best["warm_mbs"],
         "ceiling_utilisation": ratio,
     }
 
@@ -190,6 +241,40 @@ def _recommend(results: list, ceiling_mbs: float) -> dict:
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
+
+def _print_throughput_table(
+    label: str,
+    key: str,
+    results: list,
+    recommendation: dict,
+    best_block: int,
+    best_threads: int,
+) -> None:
+    thread_vals = sorted(set(r["threads"] for r in results))
+    block_vals  = sorted(set(r["block_mib"] for r in results))
+
+    print("  {} throughput (MB/s)".format(label))
+    print("  " + "-" * 50)
+    header = "  {:>10}".format("block\\threads")
+    for t in thread_vals:
+        header += "  {:>7}".format("t={}".format(t))
+    print(header)
+
+    for blk in block_vals:
+        row = "  {:>7d} MiB".format(blk)
+        for t in thread_vals:
+            match = next(
+                (r for r in results if r["block_mib"] == blk and r["threads"] == t),
+                None,
+            )
+            if match:
+                marker = "*" if (blk == best_block and t == best_threads) else " "
+                row += "  {:6.0f}{}".format(match[key], marker)
+            else:
+                row += "  {:>7}".format("—")
+        print(row)
+    print()
+
 
 def _print_table(
     sys_info: dict,
@@ -199,6 +284,7 @@ def _print_table(
     size_mib: int,
     algo: str,
     test_dir: str,
+    cache_dropped: bool,
 ) -> None:
     W = 70
     print("=" * W)
@@ -213,6 +299,10 @@ def _print_table(
     ))
     print("  Algorithm  : {}".format(algo))
     print("  Test file  : {} MiB in {}".format(size_mib, test_dir))
+    print("  Cache drop : {}".format(
+        "yes (cold figures are true storage throughput)" if cache_dropped
+        else "no (root required) — cold figures reflect warm cache"
+    ))
     print()
 
     print("  Algorithm ceiling (in-memory, no I/O)")
@@ -222,38 +312,24 @@ def _print_table(
         print("    block {:2d} MiB : {:6.0f} MB/s  {}".format(blk, mbs, bar))
     print()
 
-    print("  Pipeline throughput (real I/O)")
-    print("  " + "-" * 50)
+    best_block   = recommendation["best_block_mib"]
+    best_threads = recommendation["best_threads"]
 
-    thread_vals = sorted(set(r["threads"] for r in results))
-    block_vals  = sorted(set(r["block_mib"] for r in results))
+    _print_throughput_table(
+        "Cold (after cache drop) pipeline", "cold_mbs",
+        results, recommendation, best_block, best_threads,
+    )
+    _print_throughput_table(
+        "Warm (page-cache) pipeline", "warm_mbs",
+        results, recommendation, best_block, best_threads,
+    )
 
-    # Header
-    header = "  {:>10}".format("block\\threads")
-    for t in thread_vals:
-        header += "  {:>7}".format("t={}".format(t))
-    print(header)
-
-    for blk in block_vals:
-        row = "  {:>7d} MiB".format(blk)
-        for t in thread_vals:
-            match = next((r for r in results if r["block_mib"] == blk and r["threads"] == t), None)
-            if match:
-                marker = "*" if (match["block_mib"] == recommendation["best_block_mib"]
-                                  and match["threads"] == recommendation["best_threads"]) else " "
-                row += "  {:6.0f}{}".format(match["throughput_mbs"], marker)
-            else:
-                row += "  {:>7}".format("—")
-        print(row)
-
-    print()
-    print("  * = best observed combination")
+    print("  * = best cold combination (used for recommendation)")
     print()
 
     rec = recommendation
     print("  Diagnosis: {}".format(rec["bound"].upper()))
     print()
-    # Word-wrap the diagnosis
     words = rec["diagnosis"].split()
     line = "  "
     for w in words:
@@ -274,7 +350,8 @@ def _print_table(
         suggested_inflight,
         "2×threads (CPU-bound)" if rec["bound"] == "cpu" else "4×threads (I/O-bound)",
     ))
-    print("    # Expected throughput: ~{:.0f} MB/s".format(rec["best_throughput_mbs"]))
+    print("    # Expected cold throughput: ~{:.0f} MB/s".format(rec["best_cold_mbs"]))
+    print("    # Expected warm throughput: ~{:.0f} MB/s".format(rec["best_warm_mbs"]))
     print("    # CPU utilisation of algorithm ceiling: {:.0f}%".format(
         rec["ceiling_utilisation"] * 100))
     if rec["bound"] != "cpu":
@@ -301,7 +378,7 @@ def main() -> int:
     p.add_argument("--max-threads", type=int, default=None,
                    help="Maximum thread count to test (default: min(8, cpu_count))")
     p.add_argument("--min-duration", type=float, default=2.0,
-                   help="Minimum seconds per measurement (default: 2.0)")
+                   help="Minimum seconds for warm passes per measurement (default: 2.0)")
     p.add_argument("--json", action="store_true",
                    help="Print results as JSON")
     p.add_argument("--verbose", action="store_true",
@@ -345,7 +422,7 @@ def main() -> int:
     tmp_dir = args.dir or tempfile.gettempdir()
     tmp_fd, tmp_path = tempfile.mkstemp(dir=tmp_dir, prefix="cephsumfs_profile_")
     try:
-        # Write test file.
+        # Write test file and flush to storage before any reads.
         chunk = os.urandom(min(args.size_mib, 16) * 1024 * 1024)
         written = 0
         target = args.size_mib * 1024 * 1024
@@ -353,12 +430,16 @@ def main() -> int:
             n = min(len(chunk), target - written)
             os.write(tmp_fd, chunk[:n])
             written += n
+        os.fsync(tmp_fd)
         os.close(tmp_fd)
+
+        # Attempt an initial cache drop so the first measurement pass is cold.
+        cache_dropped = _drop_caches()
 
         results = []
         for block_mib in pipeline_blocks:
             for threads in thread_counts:
-                mbs = _measure_pipeline(
+                measurement = _measure_pipeline(
                     tmp_path, args.size_mib, args.algo,
                     block_mib, threads,
                     args.min_duration, args.verbose,
@@ -366,7 +447,8 @@ def main() -> int:
                 results.append({
                     "block_mib": block_mib,
                     "threads": threads,
-                    "throughput_mbs": mbs,
+                    "cold_mbs": measurement["cold_mbs"],
+                    "warm_mbs": measurement["warm_mbs"],
                 })
     finally:
         try:
@@ -386,6 +468,7 @@ def main() -> int:
             "algo": args.algo,
             "test_size_mib": args.size_mib,
             "test_dir": tmp_dir,
+            "cache_dropped": cache_dropped,
             "ceiling_mbs": ceiling,
             "results": results,
             "recommendation": recommendation,
@@ -394,7 +477,7 @@ def main() -> int:
     else:
         _print_table(
             sys_info, ceiling, results, recommendation,
-            args.size_mib, args.algo, tmp_dir,
+            args.size_mib, args.algo, tmp_dir, cache_dropped,
         )
 
     return 0

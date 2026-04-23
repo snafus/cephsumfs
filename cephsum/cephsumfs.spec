@@ -1,5 +1,5 @@
 Name:           cephsumfs
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        External checksum helper for XRootD on Ceph-backed POSIX storage
 
@@ -60,6 +60,11 @@ install -Dm 0755 scripts/run_checksum.sh \
 
 
 %changelog
+* Thu Apr 23 2026 Package Maintainer <maintainer@example.com> - 0.2.2-1
+- profile_performance.py: fsync test file before reads; drop page cache before
+  each cold pass; report separate cold and warm throughput figures
+- Recommendation now based on cold throughput (representative of XRootD workload)
+
 * Thu Apr 23 2026 Package Maintainer <maintainer@example.com> - 0.2.1-1
 - Fix run_checksum.sh: call installed cephsumfs binary instead of python3 -m cephsumfs
 - Remove unused CEPHSUM_PYTHON variable from run_checksum.sh
