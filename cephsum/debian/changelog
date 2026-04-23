@@ -1,3 +1,17 @@
+cephsumfs (0.2.0-1) unstable; urgency=medium
+
+  * O_NOATIME fallback for files not owned by the calling process.
+  * Short-read detection: log WARNING and abort with EIO on truncated pread.
+  * cs_delta now uses monotonic clock to avoid NTP skew.
+  * Flag conflict validation: --override/--compute-only/--dry-run rejected
+    with --verify/--remove.
+  * Logging idempotency fix: NullHandler no longer blocks subsequent real
+    handlers.
+  * Expanded README: caching behaviour, exit codes, known limitations,
+    Ubuntu install, custom algorithm guide.
+
+ -- Package Maintainer <maintainer@example.com>  Wed, 23 Apr 2026 00:00:00 +0000
+
 cephsumfs (0.1.0-1) unstable; urgency=low
 
   * Initial release.

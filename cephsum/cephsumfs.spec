@@ -1,5 +1,5 @@
 Name:           cephsumfs
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        External checksum helper for XRootD on Ceph-backed POSIX storage
 
@@ -60,5 +60,13 @@ install -Dm 0755 scripts/run_checksum.sh \
 
 
 %changelog
+* Wed Apr 23 2026 Package Maintainer <maintainer@example.com> - 0.2.0-1
+- O_NOATIME fallback for files not owned by the calling process
+- Short-read detection: log WARNING and abort with EIO on truncated pread
+- cs_delta now uses monotonic clock to avoid NTP skew
+- Flag conflict validation: --override/--compute-only/--dry-run rejected with --verify/--remove
+- Logging idempotency fix: NullHandler no longer blocks subsequent real handlers
+- Expanded README: caching behaviour, exit codes, known limitations, Ubuntu install
+
 * Tue Apr 21 2026 Package Maintainer <maintainer@example.com> - 0.1.0-1
 - Initial release
