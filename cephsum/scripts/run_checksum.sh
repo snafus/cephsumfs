@@ -41,9 +41,6 @@
 # CEPHSUM_LOG_FILE    If set, diagnostic log is appended to this path.
 #                     Paths containing spaces are handled correctly.
 #
-# CEPHSUM_PYTHON      Python interpreter to use.
-#                     Default: python3
-#
 # XRootD configuration example
 # -----------------------------
 #   xrd.chksum adler32 /usr/libexec/cephsumfs/run_checksum.sh
@@ -55,7 +52,6 @@
 #   CEPHSUM_INFLIGHT=16   # 4 × threads
 #
 
-CEPHSUM_PYTHON="${CEPHSUM_PYTHON:-python3}"
 CEPHSUM_PREFIX="${CEPHSUM_PREFIX:-/mnt}"
 CEPHSUM_ALGO="${CEPHSUM_ALGO:-adler32}"
 CEPHSUM_BLOCK_MIB="${CEPHSUM_BLOCK_MIB:-4}"
@@ -86,5 +82,5 @@ if [ -n "${CEPHSUM_LOG_FILE}" ]; then
     set -- "$@" --log-file "${CEPHSUM_LOG_FILE}"
 fi
 
-"${CEPHSUM_PYTHON}" -m cephsumfs "$@" "${FULL_PATH}"
+exec cephsumfs "$@" "${FULL_PATH}"
 exit $?

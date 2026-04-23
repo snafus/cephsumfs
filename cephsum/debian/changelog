@@ -1,3 +1,11 @@
+cephsumfs (0.2.1-1) unstable; urgency=medium
+
+  * Fix run_checksum.sh: call installed cephsumfs binary instead of
+    python3 -m cephsumfs (no __main__.py in the package).
+  * Remove unused CEPHSUM_PYTHON variable from run_checksum.sh.
+
+ -- Package Maintainer <maintainer@example.com>  Thu, 23 Apr 2026 00:00:00 +0000
+
 cephsumfs (0.2.0-1) unstable; urgency=medium
 
   * O_NOATIME fallback for files not owned by the calling process.

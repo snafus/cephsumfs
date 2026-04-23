@@ -1,5 +1,5 @@
 Name:           cephsumfs
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        External checksum helper for XRootD on Ceph-backed POSIX storage
 
@@ -60,6 +60,10 @@ install -Dm 0755 scripts/run_checksum.sh \
 
 
 %changelog
+* Thu Apr 23 2026 Package Maintainer <maintainer@example.com> - 0.2.1-1
+- Fix run_checksum.sh: call installed cephsumfs binary instead of python3 -m cephsumfs
+- Remove unused CEPHSUM_PYTHON variable from run_checksum.sh
+
 * Wed Apr 23 2026 Package Maintainer <maintainer@example.com> - 0.2.0-1
 - O_NOATIME fallback for files not owned by the calling process
 - Short-read detection: log WARNING and abort with EIO on truncated pread

@@ -145,7 +145,6 @@ editing is required after deployment.
 | `CEPHSUM_THREADS` | `4` | Concurrent read threads (match CephFS `stripe_count`) |
 | `CEPHSUM_INFLIGHT` | *(unset)* | Max outstanding read requests; defaults to `2 × threads` |
 | `CEPHSUM_LOG_FILE` | *(unset)* | Append diagnostics to this path |
-| `CEPHSUM_PYTHON` | `python3` | Python interpreter to use |
 
 ## xattr format
 
