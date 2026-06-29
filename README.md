@@ -67,7 +67,7 @@ Default block size is 4 MiB; default thread count is 4. `run_checksum.sh` uses 3
 Add to your XRootD configuration:
 
 ```
-xrd.chksum adler32 /etc/xrootd/cephsum/run_checksum.sh
+xrootd.chksum adler32 /etc/xrootd/cephsum/run_checksum.sh
 ```
 
 Ensure the script and Python files are deployed to the path referenced in `run_checksum.sh` and that the `xrootd` user can execute them.
